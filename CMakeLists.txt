@@ -8,6 +8,7 @@ Ubpa_InitUCMake()
 
 Ubpa_InitProject()
 
+Ubpa_AddDep(UTemplate 0.4.9)
 Ubpa_AddSubDirsRec(src)
 
 Ubpa_Export(
