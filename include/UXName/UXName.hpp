@@ -14,6 +14,7 @@
 #include <limits>
 #include <type_traits>
 #include <utility>
+#include <tuple>
 
 #if !defined(UXNAME_USING_ALIAS_STRING)
 #include <string>
@@ -191,6 +192,8 @@ namespace Ubpa::UXName::details {
 
 	template<typename Str0, typename Str1>
 	struct concat_helper;
+	template<typename Str0, typename Str1>
+	using concat_helper_t = typename concat_helper<Str0, Str1>::type;
 	template<typename Char, Char... c0, Char... c1>
 	struct concat_helper<TStr<Char, c0...>, TStr<Char, c1...>> {
 		using type = TStr<Char, c0..., c1...>;
@@ -199,6 +202,28 @@ namespace Ubpa::UXName::details {
 	template<typename Str0, typename Str1>
 	constexpr auto concat(Str0 = {}, Str1 = {}) noexcept {
 		return typename concat_helper<Str0, Str1>::type{};
+	}
+
+	template<typename Separator, typename... Strs>
+	struct concat_seq_helper;
+	template<typename Separator, typename... Strs>
+	using concat_seq_helper_t = typename concat_seq_helper<Separator, Strs...>::type;
+	template<typename Separator>
+	struct concat_seq_helper<Separator> {
+		using type = TStr<typename Separator::Char>;
+	};
+	template<typename Separator, typename Str>
+	struct concat_seq_helper<Separator, Str> {
+		using type = Str;
+	};
+	template<typename Separator, typename Str, typename... Strs>
+	struct concat_seq_helper<Separator, Str, Strs...> {
+		using type = concat_helper_t<concat_helper_t<Str, Separator>, concat_seq_helper_t<Separator, Strs...>>;
+	};
+
+	template<typename Separator, typename... Strs>
+	constexpr auto concat_seq(Separator, Strs...) noexcept {
+		return concat_seq_helper_t<Separator, Strs...>{};
 	}
 
 	template<typename Str, typename X>
@@ -281,6 +306,24 @@ namespace Ubpa::UXName::details {
 			return Str{};
 	}
 
+	template<size_t N, typename Str>
+	constexpr auto get_prefix(Str = {}) {
+		static_assert(IsTStr<Str>::value);
+		if constexpr (Str::name.size() >= N)
+			return TSTR((decltype(Str::name){Str::name.data(), N}));
+		else
+			return Str{};
+	}
+
+	template<size_t N, typename Str>
+	constexpr auto get_suffix(Str = {}) {
+		static_assert(IsTStr<Str>::value);
+		if constexpr (Str::name.size() >= N)
+			return TSTR(decltype(Str::name){Str::name.data() + Str::name.size() - N});
+		else
+			return Str{};
+	}
+
 	// [Left, Right)
 	template<size_t Idx, size_t Cnt, typename Str, typename X>
 	constexpr auto replace(Str = {}, X = {}) {
@@ -299,20 +342,19 @@ namespace Ubpa::UXName::details {
 		static_assert(IsTStr<To>::value);
 		constexpr size_t idx = find(Str{}, From{});
 		if constexpr (idx != static_cast<size_t>(-1))
-			return replace<idx, From::name.size()>(Str{}, To{});
+			return replace(replace<idx, From::name.size()>(Str{}, To{}), From{}, To{});
 		else
 			return Str{};
 	}
 
 	template<typename Str, typename X>
 	constexpr auto remove(Str = {}, X = {}) {
-		static_assert(IsTStr<Str>::value);
-		static_assert(IsTStr<X>::value);
-		constexpr size_t idx = find(Str{}, X{});
-		if constexpr (idx != static_cast<size_t>(-1))
-			return remove(replace<idx, X::name.size()>(Str{}, TSTR("")), X{});
-		else
-			return Str{};
+		return replace(Str{}, X{}, TSTR(""));
+	}
+
+	template<size_t Idx, size_t Cnt, typename Str>
+	constexpr auto substr(Str = {}) {
+		return get_prefix<Cnt>(remove_prefix<Idx, Str>());
 	}
 
 	//
@@ -339,18 +381,20 @@ namespace Ubpa::UXName::details {
 		constexpr auto t1 = replace(t0, TSTR("* "), TSTR("*"));
 		constexpr auto t2 = replace(t1, TSTR(" &"), TSTR("&"));
 		constexpr auto t3 = replace(t2, TSTR("& "), TSTR("&"));
+		constexpr auto t4 = replace(t3, TSTR(", "), TSTR(","));
+		constexpr auto t5 = replace(t4, TSTR(" >"), TSTR(">"));
 
-		return remove_suffix(t3, TSTR(" "));
+		return remove_suffix(t5, TSTR(" "));
 	}
 
 	template<typename Str>
 	constexpr auto normalize_anonymous_namespace(Str = {}) {
 #if defined(__clang__)
-		return Str{};
+		return replace(Str{}, TSTR("{anonymous namespace}"), TSTR("{anonymous}"));
 #elif defined(__GNUC__)
-		return replace(Str{}, TSTR("{anonymous}"), TSTR("{anonymous namespace}"));
+		return Str{};
 #elif defined(_MSC_VER)
-		return replace(Str{}, TSTR("`anonymous namespace'"), TSTR("{anonymous namespace}"));
+		return replace(Str{}, TSTR("`anonymous namespace'"), TSTR("{anonymous}"));
 #endif
 	}
 
@@ -383,6 +427,81 @@ namespace Ubpa::UXName::details {
 		}
 #endif
 	}
+
+	template<typename Str>
+	constexpr size_t get_template_arg_num(Str = {}) {
+		size_t k = 0;
+		size_t rst = 0;
+		for (size_t i = 0; i < Str::name.size(); i++) {
+			if (Str::name[i] == '<') {
+				if (k == 0 && Str::name[i + 1] != '>')
+					++rst;
+				++k;
+			}
+			else if (Str::name[i] == ',') {
+				if (k == 1)
+					++rst;
+			}
+			else if (Str::name[i] == '>')
+				k--;
+		}
+		return rst;
+	}
+
+	template<typename Str, size_t N>
+	constexpr auto get_template_arg_index(Str = {}) {
+		std::array<size_t, N + 1> indices = { static_cast<size_t>(-1) };
+		size_t k = 0;
+		size_t cnt = 0;
+		for (size_t i = 0; i < Str::name.size(); i++) {
+			if (Str::name[i] == '<') {
+				if (k == 0 && Str::name[i + 1] != '>') {
+					indices[cnt] = i + 1;
+					++cnt;
+				}
+				++k;
+			}
+			else if (Str::name[i] == ',') {
+				if (k == 1) {
+					indices[cnt] = i + 1;
+					++cnt;
+				}
+			}
+			else if (Str::name[i] == '>') {
+				k--;
+				if (k == 0)
+					indices[cnt] = i + 1;
+			}
+		}
+		return indices;
+	}
+	template<typename Str>
+	constexpr auto normalize_type_name(Str = {});
+
+	template<typename Str, size_t... Ns>
+	constexpr auto normalize_template_arg_type_name(Str = {}, std::index_sequence<Ns...> = {}) {
+		constexpr size_t N = sizeof...(Ns);
+		constexpr auto seperator = TSTR(",");
+		constexpr auto indices = get_template_arg_index<Str, N>();
+		constexpr auto template_args = std::tuple{ normalize_type_name(substr<indices[Ns], indices[Ns + 1] - indices[Ns] - 1, Str>()) ... };
+		constexpr auto template_args_name =
+			std::apply([seperator](auto... args) {
+			return concat_seq(seperator, args...);
+				}, template_args);
+		return concat(concat(get_prefix<indices[0], Str>(), template_args_name), remove_prefix<indices[N] - 1, Str>());
+	}
+
+	template<typename Str>
+	constexpr auto normalize_type_name(Str) {
+		constexpr auto name0 = remove_class_key(Str{});
+		constexpr auto name1 = move_cv(name0);
+		constexpr size_t N = get_template_arg_num(name1);
+		if constexpr (N > 0) {
+			return normalize_template_arg_type_name(name1, std::make_index_sequence<N>{});;
+		}
+		else
+			return name1;
+	}
 }
 
 namespace Ubpa::UXName {
@@ -413,11 +532,10 @@ namespace Ubpa::UXName {
 #  elif defined(_MSC_VER)
 		constexpr auto name = details::remove_suffix<17>(details::remove_prefix<95>(sig));
 #  endif
-		constexpr auto name1 = details::remove_class_key(name);
-		constexpr auto name2 = details::normalize_anonymous_namespace(name1);
-		constexpr auto name3 = details::remove_useless_space(name2);
-		constexpr auto name4 = details::move_cv(name3);
-		return name4;
+		constexpr auto name1 = details::normalize_anonymous_namespace(name);
+		constexpr auto name2 = details::remove_useless_space(name1);
+		constexpr auto name3 = details::normalize_type_name(name2);
+		return name3;
 #else
 		return TSTR(""); // Unsupported compiler.
 #endif
