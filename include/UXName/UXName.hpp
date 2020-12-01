@@ -201,7 +201,13 @@ namespace Ubpa::UXName::details {
 
 	template<typename T>
 	constexpr auto func_signature_impl() noexcept {
+#  if defined(__clang__)
+		return std::string_view{ __PRETTY_FUNCTION__ };
+#  elif defined(__GNUC__)
+		return std::string_view{ __PRETTY_FUNCTION__ };
+#  elif defined(_MSC_VER)
 		return std::string_view{ __FUNCSIG__ };
+#  endif
 	}
 
 	template<typename T>
