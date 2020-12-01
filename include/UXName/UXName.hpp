@@ -169,36 +169,6 @@ namespace Ubpa::UXName::details {
 	using identity = T;
 #endif
 
-	template<typename TStr, typename TX>
-	constexpr bool starts_with(TStr = {}, TX = {}) noexcept {
-		static_assert(IsTStr<TStr>::value && IsTStr<TX>::value);
-		if (TStr::name.size() < TX::name.size())
-			return false;
-		for (size_t i = 0; i < TX::name.size(); i++) {
-			if (TStr::name[i] != TX::name[i])
-				return false;
-		}
-		return true;
-	}
-
-	template<size_t N, typename TStr>
-	constexpr auto remove_prefix(TStr = {}) {
-		static_assert(IsTStr<TStr>::value);
-		if constexpr (TStr::name.size() >= N)
-			return TSTR(decltype(TStr::name){TStr::name.data() + N});
-		else
-			return TSTR("");
-	}
-
-	template<size_t N, typename TStr>
-	constexpr auto remove_suffix(TStr = {}) {
-		static_assert(IsTStr<TStr>::value);
-		if constexpr (TStr::name.size() >= N)
-			return TSTR((decltype(TStr::name){TStr::name.data(), TStr::name.size() - N}));
-		else
-			return TSTR("");
-	}
-
 	template<typename T>
 	constexpr auto func_signature_impl() noexcept {
 #  if defined(__clang__)
@@ -214,6 +184,205 @@ namespace Ubpa::UXName::details {
 	constexpr auto func_signature()noexcept {
 		return TSTR(func_signature_impl<identity<T>>());
 	}
+
+	//
+	// TStr Utils
+	///////////////
+
+	template<typename Str0, typename Str1>
+	struct concat_helper;
+	template<typename Char, Char... c0, Char... c1>
+	struct concat_helper<TStr<Char, c0...>, TStr<Char, c1...>> {
+		using type = TStr<Char, c0..., c1...>;
+	};
+
+	template<typename Str0, typename Str1>
+	constexpr auto concat(Str0 = {}, Str1 = {}) noexcept {
+		return typename concat_helper<Str0, Str1>::type{};
+	}
+
+	template<typename Str, typename X>
+	constexpr size_t find(Str = {}, X = {}) noexcept {
+		static_assert(IsTStr<Str>::value && IsTStr<X>::value);
+		if constexpr (Str::name.size() >= X::name.size()) {
+			for (size_t i = 0; i < Str::name.size() - X::name.size() + 1; i++) {
+				bool flag = true;
+				for (size_t k = 0; k < X::name.size(); k++) {
+					if (Str::name[i + k] != X::name[k]) {
+						flag = false;
+						break;
+					}
+				}
+				if (flag)
+					return i;
+			}
+		}
+		return static_cast<size_t>(-1);
+	}
+
+	template<typename Str, typename X>
+	constexpr bool starts_with(Str = {}, X = {}) noexcept {
+		static_assert(IsTStr<Str>::value && IsTStr<X>::value);
+		if (Str::name.size() < X::name.size())
+			return false;
+		for (size_t i = 0; i < X::name.size(); i++) {
+			if (Str::name[i] != X::name[i])
+				return false;
+		}
+		return true;
+	}
+
+	template<typename Str, typename X>
+	constexpr bool ends_with(Str = {}, X = {}) noexcept {
+		static_assert(IsTStr<Str>::value && IsTStr<X>::value);
+		if (Str::name.size() < X::name.size())
+			return false;
+		for (size_t i = 0; i < X::name.size(); i++) {
+			if (Str::name[Str::name.size() - X::name.size() + i] != X::name[i])
+				return false;
+		}
+		return true;
+	}
+
+	template<size_t N, typename Str>
+	constexpr auto remove_prefix(Str = {}) {
+		static_assert(IsTStr<Str>::value);
+		if constexpr (Str::name.size() >= N)
+			return TSTR(decltype(Str::name){Str::name.data() + N});
+		else
+			return TSTR("");
+	}
+
+	template<typename Str, typename X>
+	constexpr auto remove_prefix(Str = {}, X = {}) {
+		static_assert(IsTStr<Str>::value);
+		static_assert(IsTStr<X>::value);
+		if constexpr (starts_with<Str, X>())
+			return remove_prefix<X::name.size(), Str>();
+		else
+			return Str{};
+	}
+
+	template<size_t N, typename Str>
+	constexpr auto remove_suffix(Str = {}) {
+		static_assert(IsTStr<Str>::value);
+		if constexpr (Str::name.size() >= N)
+			return TSTR((decltype(Str::name){Str::name.data(), Str::name.size() - N}));
+		else
+			return TSTR("");
+	}
+
+	template<typename Str, typename X>
+	constexpr auto remove_suffix(Str = {}, X = {}) {
+		static_assert(IsTStr<Str>::value);
+		if constexpr (ends_with<Str, X>())
+			return remove_suffix<X::name.size(), Str>();
+		else
+			return Str{};
+	}
+
+	// [Left, Right)
+	template<size_t Idx, size_t Cnt, typename Str, typename X>
+	constexpr auto replace(Str = {}, X = {}) {
+		static_assert(IsTStr<Str>::value);
+		static_assert(IsTStr<X>::value);
+		constexpr auto prefix = remove_suffix<Str::name.size() - Idx>(Str{});
+		constexpr auto suffix = remove_prefix<Idx + Cnt>(Str{});
+
+		return concat(concat(prefix, X{}), suffix);
+	}
+
+	template<typename Str, typename From, typename To>
+	constexpr auto replace(Str = {}, From = {}, To = {}) {
+		static_assert(IsTStr<Str>::value);
+		static_assert(IsTStr<From>::value);
+		static_assert(IsTStr<To>::value);
+		constexpr size_t idx = find(Str{}, From{});
+		if constexpr (idx != static_cast<size_t>(-1))
+			return replace<idx, From::name.size()>(Str{}, To{});
+		else
+			return Str{};
+	}
+
+	template<typename Str, typename X>
+	constexpr auto remove(Str = {}, X = {}) {
+		static_assert(IsTStr<Str>::value);
+		static_assert(IsTStr<X>::value);
+		constexpr size_t idx = find(Str{}, X{});
+		if constexpr (idx != static_cast<size_t>(-1))
+			return remove(replace<idx, X::name.size()>(Str{}, TSTR("")), X{});
+		else
+			return Str{};
+	}
+
+	//
+	// Misc
+	/////////
+
+	template<typename Str>
+	constexpr auto remove_class_key(Str = {}) {
+#if defined(__clang__)
+		return Str{};
+#elif defined(__GNUC__)
+		return Str{};
+#elif defined(_MSC_VER)
+		constexpr auto name1 = details::remove_prefix(Str{}, TSTR("struct "));
+		constexpr auto name2 = details::remove_prefix(name1, TSTR("enum "));
+		constexpr auto name3 = details::remove_prefix(name2, TSTR("class "));
+		return name3;
+#endif
+	}
+
+	template<typename Str>
+	constexpr auto remove_useless_space(Str = {}) {
+		constexpr auto t0 = replace(Str{}, TSTR(" *"), TSTR("*"));
+		constexpr auto t1 = replace(t0, TSTR("* "), TSTR("*"));
+		constexpr auto t2 = replace(t1, TSTR(" &"), TSTR("&"));
+		constexpr auto t3 = replace(t2, TSTR("& "), TSTR("&"));
+
+		return remove_suffix(t3, TSTR(" "));
+	}
+
+	template<typename Str>
+	constexpr auto normalize_anonymous_namespace(Str = {}) {
+#if defined(__clang__)
+		return Str{};
+#elif defined(__GNUC__)
+		return replace(Str{}, TSTR("{anonymous}"), TSTR("{anonymous namespace}"));
+#elif defined(_MSC_VER)
+		return replace(Str{}, TSTR("`anonymous namespace'"), TSTR("{anonymous namespace}"));
+#endif
+	}
+
+	template<typename Str>
+	constexpr auto move_cv(Str = {}) {
+#if defined(__clang__)
+		return Str{};
+#elif defined(__GNUC__)
+		return Str{};
+#elif defined(_MSC_VER)
+		if constexpr (ends_with(Str{}, TSTR("*const&")))
+			return concat(move_cv(remove_suffix<7, Str>()), TSTR("*const&"));
+		else if constexpr (ends_with(Str{}, TSTR("*const&&")))
+			return concat(move_cv(remove_suffix<7, Str>()), TSTR("*const&&"));
+		else if constexpr (ends_with(Str{}, TSTR("*")))
+			return concat(move_cv(remove_suffix<1, Str>()), TSTR("*"));
+		else if constexpr (ends_with(Str{}, TSTR("&&")))
+			return concat(move_cv(remove_suffix<2, Str>()), TSTR("&&"));
+		else if constexpr (ends_with(Str{}, TSTR("&")))
+			return concat(move_cv(remove_suffix<1, Str>()), TSTR("&"));
+		else {
+			if constexpr (ends_with(Str{}, TSTR(" const volatile")))
+				return concat(TSTR("const volatile "), move_cv(remove_suffix<sizeof("const volatile"), Str>()));
+			else if constexpr (ends_with(Str{}, TSTR(" volatile")))
+				return concat(TSTR("volatile "), move_cv(remove_suffix<sizeof("volatile"), Str>()));
+			else if constexpr (ends_with(Str{}, TSTR(" const")))
+				return concat(TSTR("const "), move_cv(remove_suffix<sizeof("const"), Str>()));
+			else
+				return Str{};
+		}
+#endif
+	}
 }
 
 namespace Ubpa::UXName {
@@ -228,6 +397,27 @@ namespace Ubpa::UXName {
 #  elif defined(_MSC_VER)
 		return details::remove_suffix<17>(details::remove_prefix<95>(sig));
 #  endif
+#else
+		return TSTR(""); // Unsupported compiler.
+#endif
+	}
+
+	template<typename T>
+	constexpr auto type_name()noexcept {
+		constexpr auto sig = details::func_signature<T>();
+#if defined(UXNAME_TYPE_SUPPORTED) && UXNAME_TYPE_SUPPORTED
+#  if defined(__clang__)
+		constexpr auto name = details::remove_suffix<1>(details::remove_prefix<55>(sig));
+#  elif defined(__GNUC__)
+		constexpr auto name = details::remove_suffix<1>(details::remove_prefix<70>(sig));
+#  elif defined(_MSC_VER)
+		constexpr auto name = details::remove_suffix<17>(details::remove_prefix<95>(sig));
+#  endif
+		constexpr auto name1 = details::remove_class_key(name);
+		constexpr auto name2 = details::normalize_anonymous_namespace(name1);
+		constexpr auto name3 = details::remove_useless_space(name2);
+		constexpr auto name4 = details::move_cv(name3);
+		return name4;
 #else
 		return TSTR(""); // Unsupported compiler.
 #endif
