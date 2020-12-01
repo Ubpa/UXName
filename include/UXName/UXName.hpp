@@ -125,7 +125,7 @@ namespace Ubpa::detail {
 	template <typename T>
 	constexpr decltype(auto) TSTRHelper(T) {
 		using Char = std::decay_t<decltype(T::get()[0])>;
-		return TSTRHelperImpl<Char, T>(std::make_index_sequence<TSTRSizeof<decltype(T::get())>::template get(T::get())>());
+		return TSTRHelperImpl<Char, T>(std::make_index_sequence<TSTRSizeof<decltype(T::get())>::get(T::get())>());
 	}
 }
 
@@ -217,15 +217,14 @@ namespace Ubpa::UXName::details {
 }
 
 namespace Ubpa::UXName {
-
 	template<typename T>
 	constexpr auto raw_type_name()noexcept {
 		constexpr auto sig = details::func_signature<T>();
 #if defined(UXNAME_TYPE_SUPPORTED) && UXNAME_TYPE_SUPPORTED
 #  if defined(__clang__)
-		return details::remove_suffix<2>(details::remove_prefix<63>(sig));
+		return details::remove_suffix<1>(details::remove_prefix<55>(sig));
 #  elif defined(__GNUC__)
-		return details::remove_suffix<2>(details::remove_prefix<78>(sig));
+		return details::remove_suffix<1>(details::remove_prefix<70>(sig));
 #  elif defined(_MSC_VER)
 		return details::remove_suffix<17>(details::remove_prefix<95>(sig));
 #  endif
